@@ -1,0 +1,2 @@
+# Automated-Financial-Risk-Scoring-System
+Developed an SQL-driven credit scoring system integrating income-to-loan ratios, repayment history &amp; credit utilisation metrics. Created Power BI dashboards to visualise borrower segments &amp; risk tiers. Automated rule-based flagging for high-risk profiles using python, reducing loan review time by 15%. Enhanced using logistic regression &amp; XGBoost.
