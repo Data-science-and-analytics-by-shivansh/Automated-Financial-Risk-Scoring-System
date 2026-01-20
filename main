@@ -1,0 +1,124 @@
+# feature engineering:
+-- credit_features.sql
+SELECT
+    b.customer_id,
+    b.annual_income,
+    b.loan_amount,
+    b.credit_utilization,
+    b.employment_years,
+
+    (b.loan_amount / NULLIF(b.annual_income, 0)) AS income_to_loan_ratio,
+
+    r.num_late_payments,
+    r.days_past_due,
+    r.default_flag
+FROM borrowers b
+LEFT JOIN repayment_history r
+    ON b.customer_id = r.customer_id;
+    # load data :
+import pandas as pd
+import numpy as np
+df = pd.read_csv("credit_features.csv")
+# Data quality checks:
+dq = pd.DataFrame({
+    "missing_pct": df.isnull().mean(),
+    "unique": df.nunique()
+})
+print(dq)
+# Rule-based risk flags:
+df["high_utilization_flag"] = (df["credit_utilization"] > 0.8).astype(int)
+df["low_income_flag"] = (df["income_to_loan_ratio"] > 0.6).astype(int)
+df["delinquency_flag"] = (df["num_late_payments"] >= 3).astype(int)
+
+df["rule_based_risk"] = (
+    df["high_utilization_flag"]
+    + df["low_income_flag"]
+    + df["delinquency_flag"]
+)
+# Target definition :
+TARGET = "default_flag"
+
+X = df.drop(columns=[TARGET, "customer_id"])
+y = df[TARGET]
+# Train / test split :
+from sklearn.model_selection import train_test_split
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y,
+    stratify=y,
+    test_size=0.2,
+    random_state=42
+)
+# preprocessing :
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
+pipeline_lr = Pipeline(steps=[
+    ("scaler", StandardScaler()),
+    ("model", LogisticRegression(
+        max_iter=1000,
+        class_weight="balanced"
+    ))
+])
+# Logistic Regression (baseline & explainability)
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import roc_auc_score, classification_report
+
+pipeline_lr.fit(X_train, y_train)
+
+y_prob_lr = pipeline_lr.predict_proba(X_test)[:, 1]
+y_pred_lr = pipeline_lr.predict(X_test)
+
+print("LR ROC-AUC:", roc_auc_score(y_test, y_prob_lr))
+print(classification_report(y_test, y_pred_lr))
+# Odds ratios:
+odds = pd.DataFrame({
+    "feature": X.columns,
+    "odds_ratio": np.exp(pipeline_lr.named_steps["model"].coef_[0])
+}).sort_values(by="odds_ratio", ascending=False)
+
+print(odds)
+# XGBoost :
+from xgboost import XGBClassifier
+python
+Copy code
+xgb = XGBClassifier(
+    n_estimators=300,
+    max_depth=4,
+    learning_rate=0.05,
+    subsample=0.8,
+    colsample_bytree=0.8,
+    eval_metric="logloss",
+    random_state=42
+)
+xgb.fit(X_train, y_train)
+
+y_prob_xgb = xgb.predict_proba(X_test)[:, 1]
+print("XGB ROC-AUC:", roc_auc_score(y_test, y_prob_xgb))
+# Hybrid risk score:
+df["final_risk_score"] = (
+    0.4 * df["rule_based_risk"]
+    + 0.3 * pipeline_lr.predict_proba(X)[:, 1]
+    + 0.3 * xgb.predict_proba(X)[:, 1]
+)
+# Risk tiers :
+df["risk_tier"] = pd.cut(
+    df["final_risk_score"],
+    bins=[-1, 0.3, 0.6, 1.0],
+    labels=["Low", "Medium", "High"]
+)
+df[[
+    "customer_id",
+    "final_risk_score",
+    "risk_tier",
+    "credit_utilization",
+    "income_to_loan_ratio"
+]].to_csv("powerbi_risk_dashboard.csv", index=False)
+# Automation logic :
+def auto_flag(row):
+    if row["risk_tier"] == "High":
+        return "Auto Reject"
+    elif row["risk_tier"] == "Medium":
+        return "Manual Review"
+    else:
+        return "Auto Approve"
+
+df["decision"] = df.apply(auto_flag, axis=1)
