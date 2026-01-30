@@ -15,9 +15,14 @@ SELECT
 FROM borrowers b
 LEFT JOIN repayment_history r
     ON b.customer_id = r.customer_id;
-    # load data :
+   
+
+# load data :
 import pandas as pd
 import numpy as np
+from scipy.stats import ks_2samp
+import shap
+
 df = pd.read_csv("credit_features.csv")
 # Data quality checks:
 dq = pd.DataFrame({
@@ -122,3 +127,17 @@ def auto_flag(row):
         return "Auto Approve"
 
 df["decision"] = df.apply(auto_flag, axis=1)
+#SHAP EXPLAINABILITY
+
+explainer = shap.TreeExplainer(xgb)
+shap_values = explainer.shap_values(X_test)
+shap.summary_plot(shap_values, X_test)
+
+# KS 
+ks = ks_2samp(
+    y_prob_lr[y_test == 0],
+    y_prob_lr[y_test == 1]
+).statistic
+print("KS:", ks)
+
+
